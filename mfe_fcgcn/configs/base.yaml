@@ -1,0 +1,174 @@
+# ============================================================
+# MFE-FCGCN — Configuration
+# Paper: Multi-frequency EEG and multi-functional connectivity
+#        graph convolutional network based detection method
+#        of patients with Alzheimer's disease
+# DOI: 10.1007/s40747-025-01974-x
+# ============================================================
+
+# --- Data paths ---
+# raw_dataset_root: Root of the OpenNeuro ds004504 BIDS dataset.
+#   Expected structure: <raw_dataset_root>/derivatives/sub-XXX/eeg/sub-XXX_task-eyesclosed_eeg.set
+#   Download from: https://openneuro.org/datasets/ds004504/versions/1.0.8
+raw_dataset_root: "D:/gcn/ds004504"
+
+# processed_root: Destination for intermediate CSVs produced by preprocessing.
+#   Script will write sub-directories: sub-XXX/feature_matrix/ and sub-XXX/adjacent_matrix/
+#   [PARTIALLY_SPECIFIED] Paper's path used "sample/" as a sub-directory; we keep that convention.
+processed_root: "D:/const/sample"
+
+# pt_root: Destination for serialised PyG graph .pt files.
+#   [UNSPECIFIED] Paper does not name this path explicitly; derived from context.
+#   Using: "D:/const/dataset_pt"
+#   Alternatives: any writable path on the same drive as processed_root
+pt_root: "D:/const/dataset_pt"
+
+# evaluate_root: Destination for per-fold training CSV logs.
+evaluate_root: "D:/const/evaluate"
+
+# best_model_path: Where the best-AUC checkpoint is saved/loaded.
+best_model_path: "D:/const/best_model/best_auc_model.pth"
+
+# kfold_raw_root: CSV files logging train/test split subject IDs per outer fold.
+kfold_raw_root: "D:/const/kfold_raw"
+
+# --- Subject IDs (from §4.1, dataset description) ---
+# Subjects 1–36: Alzheimer's disease patients  (label = 1)
+# Subjects 37–65: Healthy controls             (label = 0)
+# Total: 65 subjects from OpenNeuro ds004504
+subjects:
+  ad_range: [1, 36]       # §4.1 — AD patients, sub-001 … sub-036
+  hc_range: [37, 65]      # §4.1 — Healthy controls, sub-037 … sub-065
+  total: 65
+
+# --- EEG channel selection ---
+# §3.1 — "19 standard EEG channels"
+# Channels follow 10-20 international system
+channels:
+  - Fp1
+  - Fp2
+  - F3
+  - F4
+  - C3
+  - C4
+  - P3
+  - P4
+  - O1
+  - O2
+  - F7
+  - F8
+  - T3
+  - T4
+  - T5
+  - T6
+  - Fz
+  - Cz
+  - Pz
+n_channels: 19  # §3.1
+
+# --- Frequency bands ---
+# §3.1 — "five EEG frequency bands: Delta, Theta, Alpha, Beta, Gamma"
+frequency_bands:
+  Delta: [0.5, 4]    # Hz — §3.1
+  Theta: [4, 8]      # Hz — §3.1
+  Alpha: [8, 13]     # Hz — §3.1
+  Beta:  [13, 30]    # Hz — §3.1
+  Gamma: [30, 45]    # Hz — §3.1
+n_bands: 5            # §3.1
+
+# --- PSD computation (Welch's method) ---
+# §3.1 — power spectral density computed via Welch's method
+psd:
+  n_fft: 2500         # §3.1 / paper implementation — FFT window length (samples)
+  n_overlap: 500      # §3.1 / paper implementation — overlap in samples
+  average: null       # paper uses None → returns per-segment PSDs before windowed averaging
+
+# --- Windowed sample construction ---
+# §3.2 — "we average 4 consecutive Welch segments per sample"
+#   window_size: number of PSD segments averaged into one sample node feature vector
+#   stride: step between consecutive windows (= 1 segment ≡ non-overlapping windows)
+sampling:
+  window_size: 4      # §3.2 — 4 consecutive PSD segments averaged
+  stride: 1           # [UNSPECIFIED] Paper does not state stride; using 1 (slide by one segment)
+                      # Alternatives: window_size (no-overlap windows)
+  max_samples_ad: 80  # §4.1 / paper implementation — cap per AD subject
+  max_samples_hc: 100 # §4.1 / paper implementation — cap per HC subject
+
+# --- Functional connectivity ---
+# §3.2 — "two functional connectivity networks:
+#   (1) mutual information (nonlinear, MI matrix)
+#   (2) Pearson correlation (linear, PC matrix)"
+connectivity:
+  # MI matrix: row-max normalised so each row sums to 1
+  #   Row normalisation confirmed in paper implementation
+  mi_normalize: row_max   # §3.2
+  # PC matrix: absolute values, row-sum normalised (off-diagonal), diagonal preserved
+  pc_normalize: row_sum_abs  # §3.2
+
+# --- Graph structure ---
+# §3.2 — Each sample is a graph of 19 nodes (channels).
+# Edges are dense (all channel pairs) weighted by connectivity matrices.
+# Two edge sets per per-band subgraph: MI edges and PC edges.
+graph:
+  n_nodes: 19   # §3.1 — one node per EEG channel
+
+# --- CNN feature extractor inside GCN ---
+# §3.3 — "a 1-D convolutional layer condenses PSD frequency bins into a fixed-length node feature"
+# The kernel size equals (1, n_psd_bins) so output is 1 feature per channel per band.
+# Different bands have different PSD bin counts → different kernel sizes.
+# Kernel sizes derived from: n_bins = floor((n_fft/2 + 1) * (fmax - fmin) / (sfreq/2)) * window_size
+# [UNSPECIFIED] Paper does not give exact post-normalisation feature length per band;
+#   these values are inferred from the Welch parameters above.
+#   Alternatives: empirically measure by running preprocessing once.
+cnn:
+  in_channels: 1    # §3.3 — single-channel 2D conv over (n_channels, n_bins)
+  out_channels: 1   # §3.3 — one output feature per channel
+
+# --- GCN layers ---
+# §3.3 — "two GCNConv layers"
+# First conv uses MI (nonlinear) edge set, second uses PC (linear) edge set.
+gcn:
+  input_features: 16  # §3.3 / paper implementation — node feature dim after CNN (= 1 per node → then reshaped)
+                      # [UNSPECIFIED] Paper does not state this explicitly; value from paper implementation
+                      # Alternatives: empirically measure after CNN step
+  hidden_channels: 16 # §3.3 / paper implementation
+  out_channels: 5     # §3.3 / paper implementation
+
+# --- Classification head ---
+# §3.3 — "fully-connected layers after concatenating 5-band GCN outputs"
+# Input to FC = 5 bands × 19 nodes × out_channels = 5 × 19 × 5 = 475
+classifier:
+  lin1_channels: 30          # §3.3 / paper implementation
+  lin2_channels: 14          # §3.3 / paper implementation
+  fc_out_channels: 2         # §4.1 — binary classification: AD vs HC
+  dropout_lin1_rate: 0.8     # §3.3 / paper implementation
+  dropout_lin2_rate: 0.5     # §3.3 / paper implementation
+
+# --- Training ---
+# §4.1 — "Adam optimizer, lr = 0.00012, weight_decay = 1e-4"
+training:
+  optimizer: adam
+  lr: 0.00012          # §4.1
+  weight_decay: 1.0e-4 # §4.1
+  # ReduceLROnPlateau scheduler
+  # [PARTIALLY_SPECIFIED] "scheduler" mentioned in paper implementation;
+  #   factor/patience not stated in paper text — values from paper implementation
+  scheduler:
+    mode: min
+    factor: 0.1        # [UNSPECIFIED] paper implementation value
+    patience: 5        # [UNSPECIFIED] paper implementation value
+  epochs: 200          # §4.1 / paper implementation
+  # Batch sizes — [UNSPECIFIED] paper does not state batch sizes in text;
+  #   values from paper implementation
+  batch_size_train: 64   # paper implementation
+  batch_size_val: 128    # paper implementation
+  batch_size_test: 256   # paper implementation
+  criterion: cross_entropy  # §4.1
+
+# --- Cross-validation ---
+# §4.1 — "outer 80/20 train-test split; inner 15-fold cross-validation"
+cv:
+  test_size: 0.2        # §4.1
+  inner_k: 15           # §4.1
+  inner_random_state: 1 # [UNSPECIFIED] paper does not state seed; using 1
+  stratified: true      # [UNSPECIFIED] assumed; stratified on label to preserve class balance
