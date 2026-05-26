@@ -1,6 +1,5 @@
-#GCN in eeg
 
-## What this implements
+# What this implements
 
 The full MFE-FCGCN pipeline — from raw EEG `.set` files to trained classifier:
 
