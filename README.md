@@ -1,14 +1,4 @@
-# MFE-FCGCN
-
-**Multi-frequency EEG and Multi-Functional Connectivity Graph Convolutional Network**  
-for Alzheimer's Disease Detection
-
-> Implementation of: Yujian Liu, Libing An, Haiqiang Yang, Shuzhi Sam Ge.  
-> *Multi-frequency EEG and multi-functional connectivity graph convolutional network based detection method of patients with Alzheimer's disease.*  
-> Complex & Intelligent Systems, Vol. 11, Article 366, 2025.  
-> DOI: [10.1007/s40747-025-01974-x](https://doi.org/10.1007/s40747-025-01974-x)
-
----
+#GCN in eeg
 
 ## What this implements
 
